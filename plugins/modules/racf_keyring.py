@@ -95,6 +95,8 @@ RETURN = r"""
 """
 
 
+# from billpereira.community_racf.plugins.module_utils.racf_helper import generate_keyring_owner_suffix, run_tso_command_and_capture_output
+
 def run_tso_command_and_capture_output(command):
     try:
         command_results = subprocess.run([command], capture_output=True, shell=True)
@@ -105,7 +107,7 @@ def run_tso_command_and_capture_output(command):
 def generate_keyring_owner_suffix(keyring_owner):
     return f"ID({keyring_owner})" if keyring_owner else ""
 
-def extract_certificates(listring):
+def extract_certificates_from_ring(listring):
     cert_info = listring.split("\n")[7:]
     cert_list = [
         {
@@ -127,7 +129,7 @@ def list_ring(ringname, keyring_owner):
     list_of_certificates = (
         []
         if "No certificates connected" in racf_list_output
-        else extract_certificates(racf_list_output)
+        else extract_certificates_from_ring(racf_list_output)
     )
     return {
         "list_ring": racf_list_command,
