@@ -113,7 +113,7 @@ EXAMPLES = r"""
 RETURN = r"""
 # These are examples of possible return values, and in general should use other names for return values.
   racf_info:
-    description:  Th
+    description:  The cert fields
     sample:
         certificate_id: 2QXB1fDx54KJk5OjoqNA
         common_name: billtst

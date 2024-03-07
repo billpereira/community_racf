@@ -55,28 +55,28 @@ author:
 EXAMPLES = r"""
 # Pass in a message
 - name: Create keyring for the user running playbook
-  my_namespace.my_collection.racf_keyring:
+  billpereira.community_racf.racf_keyring:
     name: keyringName
     state: present 
     
 - name: Create keyring for specific user
-  my_namespace.my_collection.racf_keyring:
+  billpereira.community_racf.racf_keyring:
     name: keyringName
     keyring_owner: keyringOwner
     state: present
 
 - name: Delete keyring for the user running playbook
-  my_namespace.my_collection.racf_keyring:
+  billpereira.community_racf.racf_keyring:
     name: keyringName
     state: absent
 
 - name: List the keyringName for the current ansible_user
-  my_namespace.my_collection.racf_keyring:
+  billpereira.community_racf.racf_keyring:
     name: keyringName
     list_only: true
     
 - name: Connect the certificateLabel from certificateOwner to the keyringName from keyringOwner
-  my_namespace.my_collection.racf_keyring:
+  billpereira.community_racf.racf_keyring:
     name: keyringName
     keyring_owner: keyringOwner
     certificate_owner: certificateOwner
