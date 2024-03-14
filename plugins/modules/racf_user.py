@@ -38,10 +38,27 @@ options:
         description: List of segments you would like the module to collect info CICS CSDATA DCE DFP EIM KERB LANGUAGE LNOTES NDS NETVIEW NORACF OMVS OPERPARM OVM PROXY TSO WORKATTR
         required: False
         type: list
+    groups:
+        description: List of Groups to update connection for the user
+        required: False
+        type: dict
     list_only:
         description: When true module will only execute a list to the user
         required: false
         type: bool
+    return_output:
+        description: When true will return the ful output of LISTUSER
+        required: false
+        type: bool
+    state:
+        description:
+            - This field is required in case list_only is true
+            - If `present` checks if user exists if not create
+            - If `absent` checks if user exists if so deletes 
+            - If `connect` it will connect the user with groups specified
+            - If `remove` will remove the connection  from user with group
+        required: false
+        type: str
 
 
 
@@ -119,7 +136,7 @@ def extract_user_info(list_output):
     user_name = re.findall('NAME=(.*?)OWNER',list_output)
     user_owner = re.findall('OWNER=(.*?)\s',list_output)
     user_default_group = re.findall('DEFAULT-GROUP=(.*?)\s',list_output)
-    user_connects = [{'group':item[0].strip(), 'group_auth': item[1].strip(), 'group_owner': item[2].strip(), 'group_connect_attribute': item[3].strip() } for item in re.findall('\sGROUP=(.*?)\s*AUTH=(.*?)\s*CONNECT-OWNER=(.*?)\s[\s\S]*?ATTRIBUTES=(.*?)\s',list_output)]
+    user_connects = [{'group_name':item[0].strip(), 'group_auth': item[1].strip(), 'group_owner': item[2].strip(), 'group_attribute': item[3].strip() } for item in re.findall('\sGROUP=(.*?)\s*AUTH=(.*?)\s*CONNECT-OWNER=(.*?)\s[\s\S]*?ATTRIBUTES=(.*?)\s',list_output)]
     try:
         user_csdata_segment = [{key.strip(): value.strip()} for line in list_output.split('CSDATA')[1].splitlines() if "=" in line for key, value in [line.split("=")]]
     except IndexError: 
@@ -155,9 +172,9 @@ def list_user(user, segments=''):
 
 def delete_user(user):
     del_user_command = f"tsocmd \"du {user}\""
-    run_tso_command_and_capture_output(del_user_command)
+    command_output = run_tso_command_and_capture_output(del_user_command)
     results = list_user(user)
-    return results
+    return command_output
 
 def generate_default_group_suffix(default_group):
     return f" DFLTGRP({default_group})" if default_group else ""
@@ -174,6 +191,27 @@ def add_user(user, user_name_info,default_group,user_owner):
     results = list_user(user)
     return results if len(results)>0 else command_output
 
+def connect_groups(user, groups, user_group_connects):
+    group_updated = False
+    missing_groups = []
+    connect_results = []
+    for group in groups:
+        found_match = next((item for item in user_group_connects if item.get('group') == group['group_name']), None)
+        if found_match is None:
+            missing_groups.append(group)
+            connect_command = f"tsocmd \"CO ({user}) GROUP({group['group_name']})\""
+            connect_results.append(run_tso_command_and_capture_output(connect_command))
+            group_updated = True
+    results = list_user(user)
+        
+            
+    return {
+        'updated_groups': missing_groups,
+        'updated_user': results,
+        'command_outputs': connect_results,
+        'user_changed': group_updated
+    }
+
 
 def run_module():
     module_args = dict(
@@ -182,23 +220,29 @@ def run_module():
         default_group=dict(type="str",required=False,default=''),
         user_name_info=dict(type="str",required=False,default=''),
         user_owner=dict(type='str',required=False,default=''),
+        groups=dict(type="list",required=False, default=[],elements='dict',options=dict(
+            group_name=dict(type="str",required=False, default=''),
+            group_auth=dict(type="str",required=False, default=''),
+            group_attribute=dict(type="str",required=False, default=''),
+            group_owner=dict(type="str",required=False, default=''),
+        )),
         state=dict(
             type="str",
             required=False,
-            choices=["present", "absent"],
+            choices=["present", "absent", "connect","remove"],
         ),
         list_only=dict(type="bool", required=False, default=False),
+        return_output=dict(type="bool", required=False, default=False),
     )
 
     required_if = [
         ("list_only", False, ("state",)),
     ]
 
-    result = dict(changed=False, keyring="", racf_info={})
+    result = dict(changed=False, racf_info={})
     module = AnsibleModule(
         argument_spec=module_args, supports_check_mode=True, required_if=required_if
     )
-
     if module.check_mode:
         module.exit_json(**result)
 
@@ -211,6 +255,15 @@ def run_module():
 
     if module.params["list_only"]:
         module.exit_json(**result)
+
+    if module.params['state'] == 'connect':
+        if len(result['racf_info']) == 0:
+            module.fail_json(msg=f"Unable to find {module.params['name']} to perform connect", **result)
+        connect_results = connect_groups(module.params['name'], module.params['groups'], result['racf_info'][0]['user_group_connects'])
+        result['updated_group_connections'] = connect_results['updated_groups']
+        result['connect_outputs'] = connect_results['command_outputs']
+        result["changed"] = connect_results['user_changed']
+        result['racf_info'] = connect_results['updated_user']
 
     if (
         len(result["racf_info"]) == 0
