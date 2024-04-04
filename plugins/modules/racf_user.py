@@ -38,6 +38,23 @@ options:
         description: List of segments you would like the module to collect info CICS CSDATA DCE DFP EIM KERB LANGUAGE LNOTES NDS NETVIEW NORACF OMVS OPERPARM OVM PROXY TSO WORKATTR
         required: False
         type: list
+    user_password:
+        description: Define a password for the new user
+        required: False
+        type: str
+    user_omvs_segment:
+        description: Define OMVS Segment for the new user
+        required: False
+        type: dict
+    user_dfp_segment:
+        description: Define DFP Segment for the new user
+        required: False
+        type: dict
+    user_tso_segment:
+        description: Define TSO Segment for the new user
+        required: False
+        type: dict
+    
     groups:
         description: List of Groups to update connection for the user
         required: False
@@ -92,6 +109,21 @@ EXAMPLES = r"""
     user_owner: "{{model_user['racf_info'][0]['user_owner']}}"
     default_group: "{{ model_user['racf_info'][0]['user_default_group'] }}"
     state: present
+
+- name: Creating target user from source user applying omvs, tso and dfp segment also adding password
+    racf_user:
+    name: "{{ target_user }}"
+    user_name_info: "Automation USERID"
+    user_owner: "{{ model_user['racf_info'][0]['user_owner'] }}"
+    default_group: "{{ model_user['racf_info'][0]['user_default_group'] }}"
+    state: present
+    user_password: "P4SSW0RD"
+    user_omvs_segment:
+        home: /u/{{ target_user }}
+        program: "{{ model_user['racf_info'][0]['user_omvs_segment'][0]['program'] }}"
+        uid: auto
+    user_tso_segment: "{{ model_user['racf_info'][0]['user_tso_segment'][0] }}"
+    user_dfp_segment: "{{ model_user['racf_info'][0]['user_dfp_segment'][0] }}"
 
 - name: Deleting {{target_user}} user
     racf_user:
@@ -174,7 +206,7 @@ def delete_user(user):
     del_user_command = f"tsocmd \"du {user}\""
     command_output = run_tso_command_and_capture_output(del_user_command)
     results = list_user(user)
-    return command_output
+    return results
 
 def generate_default_group_suffix(default_group):
     return f" DFLTGRP({default_group})" if default_group else ""
@@ -185,8 +217,55 @@ def generate_name_suffix(name):
 def generate_owner_suffix(OWNER):
     return f" OWNER({OWNER})" if OWNER else ""
 
-def add_user(user, user_name_info,default_group,user_owner):
-    add_user_command = f"tsocmd \"AU {user}{generate_default_group_suffix(default_group)}{generate_name_suffix(user_name_info)}{generate_owner_suffix(user_owner)}\""
+def generate_password_suffix(password):
+    if 'NOPASSWORD' in password.upper():
+        return " NOPASSWORD"
+    return f" PASSWORD({password})" if password else ""
+
+def generate_owner_suffix(OWNER):
+    return f" OWNER({OWNER})" if OWNER else ""
+
+def generate_omvs_suffix(omvs_segment):
+    if omvs_segment:
+        assizemax = f"ASSIZEMAX({omvs_segment['assizemax']})" if omvs_segment['assizemax'] != "NONE" and omvs_segment['assizemax'] != "" else ""
+        uid = "AUTOUID" if omvs_segment['uid'] == "auto" else (f"UID({omvs_segment['uid']})" if omvs_segment['uid'] != "" else "")
+        cputimemax = f"CPUTIMEMAX({omvs_segment['cputimemax']})" if omvs_segment['cputimemax'] != "NONE" and omvs_segment['cputimemax'] != "" else ""
+        mmapareamax = f"MMAPAREAMAX({omvs_segment['mmapareamax']})" if omvs_segment['mmapareamax'] != "NONE" and omvs_segment['mmapareamax'] != "" else ""
+        procusermax = f"PROCUSERMAX({omvs_segment['procusermax']})" if omvs_segment['procusermax'] != "NONE" and omvs_segment['procusermax'] != "" else ""
+        threadsmax = f"THREADSMAX({omvs_segment['threadsmax']})" if omvs_segment['threadsmax'] != "NONE" and omvs_segment['threadsmax'] != "" else ""
+        home = f"HOME({omvs_segment['home']})" if omvs_segment['home'] else ""
+        program = f"PROGRAM({omvs_segment['program']})" if omvs_segment['program'] else ""
+        return f" OMVS({assizemax} {uid} {cputimemax} {mmapareamax} {procusermax} {threadsmax} {home} {program})"
+    return ""
+
+def generate_tso_suffix(tso_segment):
+    if tso_segment:
+        acctnum = f"ACCTNUM({tso_segment['acctnum']})" if tso_segment['acctnum'] else ""
+        command = f"COMMAND({tso_segment['command']})" if tso_segment['command'] else ""
+        dest = f"DEST({tso_segment['dest']})" if tso_segment['dest'] else ""
+        holdclass = f"HOLDCLASS({tso_segment['holdclass']})" if tso_segment['holdclass'] else ""
+        maxsize = f"MAXSIZE({tso_segment['maxsize'].lstrip('0')})" if tso_segment['maxsize'] else ""
+        msgclass = f"MSGCLASS({tso_segment['msgclass']})" if tso_segment['msgclass'] else ""
+        proc = f"PROC({tso_segment['proc']})" if tso_segment['proc'] else ""
+        size = f"SIZE({tso_segment['size'].lstrip('0')})" if tso_segment['size'] else ""
+        userdata = f"USERDATA({tso_segment['userdata']})" if tso_segment['userdata'] else ""
+        sysoutclass = f"SYS({tso_segment['sysoutclass']})" if tso_segment['sysoutclass'] else ""
+        return f" TSO({acctnum} {command} {dest} {holdclass} {maxsize} {msgclass} {proc} {size} {userdata} {sysoutclass})"
+    return ""
+
+def generate_dfp_suffix(dfp):
+    if dfp:
+        mgmtclass = f"MGMTCLAS({dfp['mgmtclass']})" if dfp['mgmtclass'] else ""
+        storclass = f"STORCLAS({dfp['storclass']})" if dfp['storclass'] else ""
+        dataclass = f"DATACLAS({dfp['dataclass']})" if dfp['dataclass'] else ""
+        dataappl = f"DATAAPPL({dfp['dataappl']})" if dfp['dataappl'] else ""
+        return f" DFP({mgmtclass} {storclass} {dataappl} {dataclass})"
+    return ""
+
+
+def add_user(user, user_name_info,default_group,user_owner, password, omvs_segment, tso_segment, dfp_segment):
+    # return generate_omvs_suffix(omvs_segment)
+    add_user_command = f"tsocmd \"AU {user}{generate_default_group_suffix(default_group)}{generate_name_suffix(user_name_info)}{generate_owner_suffix(user_owner)}{generate_password_suffix(password)}{generate_omvs_suffix(omvs_segment)}{generate_tso_suffix(tso_segment)}{generate_dfp_suffix(dfp_segment)}\""
     command_output = run_tso_command_and_capture_output(add_user_command)
     results = list_user(user)
     return results if len(results)>0 else command_output
@@ -196,7 +275,7 @@ def connect_groups(user, groups, user_group_connects):
     missing_groups = []
     connect_results = []
     for group in groups:
-        found_match = next((item for item in user_group_connects if item.get('group') == group['group_name']), None)
+        found_match = next((item for item in user_group_connects if item.get('group_name') == group['group_name']), None)
         if found_match is None:
             missing_groups.append(group)
             connect_command = f"tsocmd \"CO ({user}) GROUP({group['group_name']})\""
@@ -216,6 +295,7 @@ def connect_groups(user, groups, user_group_connects):
 def run_module():
     module_args = dict(
         name=dict(type="str", required=True),
+        user_password=dict(type="str", required=False, default='', no_log=True),
         segments=dict(type="list",required=False, default=[]),
         default_group=dict(type="str",required=False,default=''),
         user_name_info=dict(type="str",required=False,default=''),
@@ -225,6 +305,35 @@ def run_module():
             group_auth=dict(type="str",required=False, default=''),
             group_attribute=dict(type="str",required=False, default=''),
             group_owner=dict(type="str",required=False, default=''),
+        )),
+        user_omvs_segment=dict(type="dict", required=False, default={}, options=dict(
+            assizemax=dict(type="str", required=False, default=''),
+            cputimemax=dict(type="str", required=False, default=''),
+            fileprocmax=dict(type="str", required=False, default=''),
+            home=dict(type="str", required=False, default=''),
+            mmapareamax=dict(type="str", required=False, default=''),
+            procusermax=dict(type="str", required=False, default=''),
+            program=dict(type="str", required=False, default=''),
+            threadsmax=dict(type="str", required=False, default=''),
+            uid=dict(type="str", required=False, default='')
+        )),
+        user_dfp_segment=dict(type="dict", required=False, default={}, options=dict(
+            mgmtclass=dict(type="str",required=False,default=""),
+            storclass=dict(type="str",required=False,default=""),
+            dataclass=dict(type="str",required=False,default=""),
+            dataappl=dict(type="str",required=False,default=""),
+        )),
+        user_tso_segment=dict(type="dict", required=False, default={}, options=dict(
+            acctnum=dict(type="str",required=False,default=""),
+            command=dict(type="str",required=False,default=''),
+            dest=dict(type='str', required=False, default=''),
+            holdclass=dict(type='str',required=False,default=''),
+            maxsize=dict(type='str',required=False,default=''),
+            msgclass=dict(type='str',required=False,default=''),
+            proc=dict(type='str',required=False,default=''),
+            size=dict(type='str',required=False,default=''),
+            sysoutclass=dict(type='str',required=False,default=''),
+            userdata=dict(type='str',required=False,default=''),
         )),
         state=dict(
             type="str",
@@ -243,6 +352,7 @@ def run_module():
     module = AnsibleModule(
         argument_spec=module_args, supports_check_mode=True, required_if=required_if
     )
+    # result['omvs']  = module.params["user_omvs_segment"]
     if module.check_mode:
         module.exit_json(**result)
 
@@ -286,7 +396,7 @@ def run_module():
         len(result["racf_info"]) == 0
         and module.params["state"] == "present"
     ):
-        result["racf_info"] = add_user(module.params["name"], module.params['user_name_info'],module.params['default_group'],module.params['user_owner'])
+        result["racf_info"] = add_user(module.params["name"], module.params['user_name_info'],module.params['default_group'],module.params['user_owner'],module.params['user_password'],module.params['user_omvs_segment'],module.params['user_tso_segment'],module.params['user_dfp_segment'])
         result["changed"] = True
 
     # simple AnsibleModule.exit_json(), passing the key/value results
